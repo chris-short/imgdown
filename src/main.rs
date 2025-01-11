@@ -3,63 +3,91 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use reqwest;
 use url::Url;
-use tokio;
-use anyhow::{Result, Context};
-use walkdir::WalkDir;
+use serde_json::Value;
+use serde_yaml;
+use toml::Value as TomlValue;
+use anyhow::{Result, Context, anyhow};
 
-#[tokio::main]
-async  fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <path>", args[0]);
-        eprintln!("Path can be either a file or directory");
-        std::process::exit(1);
-    }
-
-    let path = &args[1];
-    let path = Path::new(path);
-
-    if path.is_file() {
-        process_file(path).await?;
-    } else if path.is_dir() {
-        process_directory(path).await?;
-    } else {
-        eprintln!("Error: Path does not exist or is not accessible: {}", path.display());
-        std::process::exit(1);
-    }
-
-    Ok(())
+// Struct to hold parsed front matter information
+#[derive(Debug)]
+struct FrontMatter {
+    content: String,
+    format: FrontMatterFormat,
 }
 
-async fn process_directory(dir_path: &Path) -> Result<()> {
-    // Define file extensions we want to process
-    let text_extensions = vec!["txt", "md", "html", "htm", "css", "xml"];
+#[derive(Debug)]
+enum FrontMatterFormat {
+    YAML,
+    TOML,
+    JSON,
+    None,
+}
 
-    for entry in WalkDir::new(dir_path)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok()) 
-    {
-        let path = entry.path();
+impl FrontMatter {
+    fn parse(content: &str) -> Result<Self> {
+        // Check for YAML front matter (---)
+        if content.starts_with("---") {
+            if let Some(end) = content[3..].find("---") {
+                return Ok(FrontMatter {
+                    content: content[3..end + 3].to_string(),
+                    format: FrontMatterFormat::YAML,
+                });
+            }
+        }
         
-        // Skip if not a file
-        if !path.is_file() {
+        // Check for TOML front matter (+++)
+        if content.starts_with("+++") {
+            if let Some(end) = content[3..].find("+++") {
+                return Ok(FrontMatter {
+                    content: content[3..end + 3].to_string(),
+                    format: FrontMatterFormat::TOML,
+                });
+            }
+        }
+        
+        // Check for JSON front matter ({)
+        if content.starts_with("{") {
+            if let Some(end) = find_json_end(content) {
+                return Ok(FrontMatter {
+                    content: content[..end + 1].to_string(),
+                    format: FrontMatterFormat::JSON,
+                });
+            }
+        }
+
+        // No front matter found
+        Ok(FrontMatter {
+            content: String::new(),
+            format: FrontMatterFormat::None,
+        })
+    }
+}
+
+fn find_json_end(content: &str) -> Option<usize> {
+    let mut brace_count = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for (i, c) in content.chars().enumerate() {
+        if escape_next {
+            escape_next = false;
             continue;
         }
 
-        // Check if file extension is one we want to process
-        if let Some(ext) = path.extension() {
-            if let Some(ext_str) = ext.to_str() {
-                if text_extensions.contains(&ext_str.to_lowercase().as_str()) {
-                    println!("Processing file: {}", path.display());
-                    if let Err(e) = process_file(path).await {
-                        eprintln!("Error processing {}: {}", path.display(), e);
-                    }
+        match c {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => brace_count += 1,
+            '}' if !in_string => {
+                brace_count -= 1;
+                if brace_count == 0 {
+                    return Some(i);
                 }
             }
+            _ => {}
         }
     }
-    Ok(())
+    None
 }
 
 async fn process_file(file_path: &Path) -> Result<()> {
@@ -69,85 +97,171 @@ async fn process_file(file_path: &Path) -> Result<()> {
     let base_dir = file_path.parent()
         .unwrap_or_else(|| Path::new(""));
 
-    // Match common image patterns in HTML, Markdown, and other formats
-    let patterns = vec![
-        r#"(?:src|href)=["']([^"']+\.(?:jpg|jpeg|png|svg|webp))["']"#,  // HTML
-        r#"!\[.*?\]\(([^)]+\.(?:jpg|jpeg|png|svg|webp))\)"#,            // Markdown
-        r#"(?:url\(['"]?)([^'")\s]+\.(?:jpg|jpeg|png|svg|webp))['"]?\)"#, // CSS
-        r#"(?m)^(?:image|cover_image|featured_image):\s*["']?([^"'\s]+\.(?:jpg|jpeg|png|svg|webp))["']?"#,  // YAML front matter
-        r#"(?m)^(?:image|cover_image|featured_image)\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|svg|webp))["']"#,   // TOML front matter
-    ];
-
     let mut processed_urls = std::collections::HashSet::new();
 
-    for pattern in patterns {
-        let re = Regex::new(pattern)?;
-        for cap in re.captures_iter(&content) {
-            let url_str = &cap[1];
-            
-            // Handle both absolute URLs and relative paths
-            let url = if let Ok(parsed_url) = Url::parse(url_str) {
-                parsed_url
-            } else {
-                // For relative paths in front matter, try to construct a proper file path
-                if url_str.starts_with('/') {
-                    // Absolute path within the Hugo site
-                    // You might need to adjust this based on your Hugo site structure
-                    continue; // Skip for now as we need the Hugo site root
-                } else {
-                    // Relative path
-                    match Url::from_file_path(base_dir.join(url_str)) {
-                        Ok(u) => u,
-                        Err(_) => continue,
-                    }
-                }
-            };
-            
-            // Skip if we've already processed this URL
-            if processed_urls.contains(url_str) {
-                continue;
-            }
-            processed_urls.insert(url_str.to_string());
+    // First try to parse as a complete JSON file
+    if content.trim().starts_with("{") {
+        if let Ok(json) = serde_json::from_str::<Value>(&content) {
+            process_json_value(&json, &mut processed_urls, base_dir).await?;
+        }
+    }
 
-            if url.scheme() == "http" || url.scheme() == "https" {
-                match download_image(&url, base_dir).await {
-                    Ok(path) => println!("Downloaded {} to {}", url, path.display()),
-                    Err(e) => eprintln!("Failed to download {}: {}", url, e),
-                }
+    // Extract and process front matter
+    let front_matter = FrontMatter::parse(&content)?;
+    match front_matter.format {
+        FrontMatterFormat::YAML => {
+            if let Ok(yaml) = serde_yaml::from_str::<Value>(&front_matter.content) {
+                process_yaml_value(&yaml, &mut processed_urls, base_dir).await?;
             }
+        },
+        FrontMatterFormat::TOML => {
+            if let Ok(toml) = front_matter.content.parse::<TomlValue>() {
+                process_toml_value(&toml, &mut processed_urls, base_dir).await?;
+            }
+        },
+        FrontMatterFormat::JSON => {
+            if let Ok(json) = serde_json::from_str::<Value>(&front_matter.content) {
+                process_json_value(&json, &mut processed_urls, base_dir).await?;
+            }
+        },
+        FrontMatterFormat::None => {}
+    }
+
+    // Process regular content with regex patterns
+    let patterns = vec![
+        // HTML/Markdown patterns
+        r#"(?:src|href)=["']([^"']+\.(?:jpg|jpeg|png|svg|webp|gif))["']"#,
+        r#"!\[.*?\]\(([^)]+\.(?:jpg|jpeg|png|svg|webp|gif))\)"#,
+        r#"(?:url\(['"]?)([^'")\s]+\.(?:jpg|jpeg|png|svg|webp|gif))['"]?\)"#,
+        
+        // Additional patterns for various formats
+        r#"(?m)^(?:image|cover|featured_image|thumbnail|banner|avatar|logo):\s*["']?([^"'\s\[]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?\s*$"#,
+        r#"(?m)^\s+(?:image|caption|icon):\s*["']?([^"'\s\[]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?\s*$"#,
+        r#"["']?(?:image|cover|featured_image|thumbnail)["']?\s*[:=]\s*["']([^"']+\.(?:jpg|jpeg|png|svg|webp|gif))["']"#,
+    ];
+
+    process_content_with_patterns(&content, &patterns, &mut processed_urls, base_dir).await?;
+
+    Ok(())
+}
+
+async fn process_yaml_value(value: &Value, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+    match value {
+        Value::String(s) => {
+            if looks_like_image_url(s) {
+                process_url(s, processed_urls, base_dir).await?;
+            }
+        },
+        Value::Mapping(map) => {
+            for (_, value) in map {
+                process_yaml_value(value, processed_urls, base_dir).await?;
+            }
+        },
+        Value::Sequence(seq) => {
+            for value in seq {
+                process_yaml_value(value, processed_urls, base_dir).await?;
+            }
+        },
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn process_json_value(value: &Value, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+    match value {
+        Value::String(s) => {
+            if looks_like_image_url(s) {
+                process_url(s, processed_urls, base_dir).await?;
+            }
+        },
+        Value::Object(obj) => {
+            for (_, value) in obj {
+                process_json_value(value, processed_urls, base_dir).await?;
+            }
+        },
+        Value::Array(arr) => {
+            for value in arr {
+                process_json_value(value, processed_urls, base_dir).await?;
+            }
+        },
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn process_toml_value(value: &TomlValue, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+    match value {
+        TomlValue::String(s) => {
+            if looks_like_image_url(s) {
+                process_url(s, processed_urls, base_dir).await?;
+            }
+        },
+        TomlValue::Table(table) => {
+            for (_, value) in table {
+                process_toml_value(value, processed_urls, base_dir).await?;
+            }
+        },
+        TomlValue::Array(arr) => {
+            for value in arr {
+                process_toml_value(value, processed_urls, base_dir).await?;
+            }
+        },
+        _ => {}
+    }
+    Ok(())
+}
+
+fn looks_like_image_url(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    lower.ends_with(".jpg") || lower.ends_with(".jpeg") || 
+    lower.ends_with(".png") || lower.ends_with(".svg") || 
+    lower.ends_with(".webp") || lower.ends_with(".gif")
+}
+
+async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+    if processed_urls.contains(url_str) {
+        return Ok(());
+    }
+    processed_urls.insert(url_str.to_string());
+
+    let url = if let Ok(parsed_url) = Url::parse(url_str) {
+        parsed_url
+    } else {
+        let path = if url_str.starts_with('/') {
+            // TODO: Handle site root configuration
+            return Ok(());
+        } else {
+            base_dir.join(url_str)
+        };
+        
+        match Url::from_file_path(path) {
+            Ok(u) => u,
+            Err(_) => return Ok(()),
+        }
+    };
+    
+    if url.scheme() == "http" || url.scheme() == "https" {
+        match download_image(&url, base_dir).await {
+            Ok(path) => println!("Downloaded {} to {}", url, path.display()),
+            Err(e) => eprintln!("Failed to download {}: {}", url, e),
         }
     }
 
     Ok(())
 }
 
-async fn download_image(url: &Url, base_dir: &Path) -> Result<PathBuf> {
-    let filename = url.path_segments()
-        .and_then(|segments| segments.last())
-        .unwrap_or("downloaded_image")
-        .to_string();
-    
-    let output_path = base_dir.join(&filename);
-    
-    // Create parent directories if they don't exist
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
+async fn process_content_with_patterns(
+    content: &str, 
+    patterns: &[&str], 
+    processed_urls: &mut std::collections::HashSet<String>,
+    base_dir: &Path
+) -> Result<()> {
+    for pattern in patterns {
+        let re = Regex::new(pattern)?;
+        for cap in re.captures_iter(content) {
+            let url_str = &cap[1];
+            process_url(url_str, processed_urls, base_dir).await?;
+        }
     }
-    
-    // Skip if file already exists
-    if output_path.exists() {
-        println!("File already exists: {}", output_path.display());
-        return Ok(output_path);
-    }
-    
-    let response = reqwest::get(url.as_str()).await
-        .with_context(|| format!("Failed to download from {}", url))?;
-    
-    let bytes = response.bytes().await
-        .with_context(|| format!("Failed to read response from {}", url))?;
-    
-    fs::write(&output_path, &bytes)
-        .with_context(|| format!("Failed to write file: {}", output_path.display()))?;
-    
-    Ok(output_path)
+    Ok(())
 }
