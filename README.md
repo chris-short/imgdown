@@ -1,6 +1,6 @@
 # imgdown
 
-A note from Chris: I built this tool to help me yank files off my [CDN](https://bunny.net?ref=ntj8lzdwyl) into [Hugo Page Bundles](https://gohugo.io/content-management/page-bundles/)
+Note: I built this tool to help me yank files off my [CDN](https://bunny.net?ref=ntj8lzdwyl) into [Hugo Page Bundles](https://gohugo.io/content-management/page-bundles/)
 
 A Rust utility that automatically downloads images referenced in text-based files like HTML, Markdown, and CSS documents.
 
