@@ -1,119 +1,121 @@
 # imgdown
 
-Note: I built this tool to help me yank files off my [CDN](https://bunny.net?ref=ntj8lzdwyl) into [Hugo Page Bundles](https://gohugo.io/content-management/page-bundles/)
-
-A Rust utility that automatically downloads images referenced in text-based files like HTML, Markdown, and CSS documents.
+A concurrent Rust CLI utility that scans text files (HTML, MD, CSS) to download referenced images, featuring parallel processing, multiple format support, and configurable download settings.
 
 ## Features
 
-- Processes individual files or entire directories recursively
-- Supports multiple file formats:
-  - HTML (.html, .htm)
-  - Markdown (.md)
-  - CSS (.css)
-  - Plain text (.txt)
-  - XML (.xml)
-- Handles various image formats: JPG, JPEG, PNG, SVG, and WebP
-- Supports both relative and absolute URLs
-- Maintains original file structure
-- Skips existing files to avoid duplicate downloads
-- Follows symbolic links when scanning directories
-
-## Prerequisites
-
-- Rust (latest stable version)
-- Cargo package manager
-
-## Dependencies
-
-```toml
-[dependencies]
-tokio = { version = "1.0", features = ["full"] }
-reqwest = "0.11"
-anyhow = "1.0"
-regex = "1.0"
-url = "2.0"
-walkdir = "2.0"
-```
+- **Concurrent Processing**: Handles multiple files and downloads simultaneously
+- **Format Support**: Detects images in:
+  - Hugo shortcodes and frontmatter
+  - Markdown image syntax
+  - HTML img tags and backgrounds
+  - CSS background images
+  - Various URL formats
+- **Smart Downloading**: 
+  - Maintains directory structure
+  - Skips existing files
+  - Verifies content types
+  - Handles various image formats (JPG, PNG, SVG, WebP, GIF, AVIF, ICO, BMP)
+- **Configurable**: All major settings can be adjusted via command line flags
+- **Progress Tracking**: Detailed progress reporting for all operations
 
 ## Installation
 
-1. Clone the repository:
 ```bash
-git clone [repository-url]
+# Clone the repository
+git clone https://github.com/username/imgdown
 cd imgdown
-```
 
-2. Build the project:
-```bash
+# Build with Cargo
 cargo build --release
-```
 
-The compiled binary will be available in `target/release/`.
+# Optional: Install system-wide
+cargo install --path .
+```
 
 ## Usage
 
-The application can process either a single file or an entire directory:
-
+Basic usage with default settings:
 ```bash
-# Process a single file
-./imgdown path/to/file.html
-
-# Process an entire directory
-./imgdown path/to/directory
+imgdown path/to/files
 ```
 
-### Example
+### Command Line Options
 
-```bash
-./imgdown ./docs/blog
+```
+OPTIONS:
+    -f, --max-concurrent-files <N>     Maximum files to process [default: 50]
+    -d, --max-concurrent-downloads <N>  Maximum downloads per file [default: 25]
+    -t, --timeout-seconds <N>          Download timeout [default: 30]
+    -e, --extensions <LIST>            File extensions to process [default: txt,md,html,htm,css,xml,...]
+    -v, --verbose                      Enable detailed output
+    -h, --help                         Show help information
 ```
 
-This will:
+### Examples
 
-1. Scan all supported files in the `./docs/blog` directory
-2. Find image references in these files
-3. Download the images to the same directory structure as their referencing files
-4. Skip any images that have already been downloaded
+Process a single file:
+```bash
+imgdown article.md
+```
 
-## How It Works
+Process a directory with custom settings:
+```bash
+imgdown ./blog --max-concurrent-files 100 --max-concurrent-downloads 50
+```
 
-1. The program accepts a file or directory path as input
-2. For directories, it recursively scans for supported file types
-3. For each file, it:
-   - Reads the content
-   - Uses regular expressions to find image references
-   - Downloads images from valid URLs
-   - Preserves the directory structure
-   - Skips existing files
+Process specific file types with longer timeout:
+```bash
+imgdown ./docs --extensions "md,html" --timeout-seconds 60
+```
 
-## Error Handling
+Enable verbose output:
+```bash
+imgdown ./content --verbose
+```
 
-- Invalid paths result in appropriate error messages
-- Download failures are logged but don't stop the process
-- File access issues are reported with detailed error messages
+## Supported Image References
 
-## Limitations
+The utility can detect and download images referenced in various formats:
 
-- Only processes files with supported extensions
-- Requires valid URL formatting in source files
-- Does not validate image content
-- Does not process JavaScript-generated image references
+### Markdown
+```markdown
+![Alt text](https://example.com/image.jpg)
+[Ref]: https://example.com/image.png
+```
+
+### Hugo Shortcodes
+```markdown
+{{< figure src="image.jpg" >}}
+{{< img src="image.png" >}}
+```
+
+### HTML
+```html
+<img src="image.jpg">
+<div style="background-image: url('image.png')">
+```
+
+### CSS
+```css
+.background {
+    background-image: url('image.jpg');
+}
+```
+
+### Hugo Frontmatter
+```yaml
+---
+cover:
+  image: featured-image.jpg
+banner: header.png
+---
+```
 
 ## Contributing
 
-Contributions are welcome! Here are some ways you can contribute:
-
-- Report bugs
-- Suggest new features
-- Add support for more file types
-- Improve error handling
-- Enhance documentation
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-[MIT License](LICENSE)
-
-## Authors
-
-Chris Short <chrisshort@duck.com>
+This project is licensed under the MIT License - see the LICENSE file for details.
