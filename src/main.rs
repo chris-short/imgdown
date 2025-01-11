@@ -74,6 +74,8 @@ async fn process_file(file_path: &Path) -> Result<()> {
         r#"(?:src|href)=["']([^"']+\.(?:jpg|jpeg|png|svg|webp))["']"#,  // HTML
         r#"!\[.*?\]\(([^)]+\.(?:jpg|jpeg|png|svg|webp))\)"#,            // Markdown
         r#"(?:url\(['"]?)([^'")\s]+\.(?:jpg|jpeg|png|svg|webp))['"]?\)"#, // CSS
+        r#"(?m)^(?:image|cover_image|featured_image):\s*["']?([^"'\s]+\.(?:jpg|jpeg|png|svg|webp))["']?"#,  // YAML front matter
+        r#"(?m)^(?:image|cover_image|featured_image)\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|svg|webp))["']"#,   // TOML front matter
     ];
 
     let mut processed_urls = std::collections::HashSet::new();
@@ -83,18 +85,34 @@ async fn process_file(file_path: &Path) -> Result<()> {
         for cap in re.captures_iter(&content) {
             let url_str = &cap[1];
             
-            if let Ok(url) = Url::parse(url_str) {
-                // Skip if we've already processed this URL
-                if processed_urls.contains(url_str) {
-                    continue;
-                }
-                processed_urls.insert(url_str.to_string());
-
-                if url.scheme() == "http" || url.scheme() == "https" {
-                    match download_image(&url, base_dir).await {
-                        Ok(path) => println!("Downloaded {} to {}", url, path.display()),
-                        Err(e) => eprintln!("Failed to download {}: {}", url, e),
+            // Handle both absolute URLs and relative paths
+            let url = if let Ok(parsed_url) = Url::parse(url_str) {
+                parsed_url
+            } else {
+                // For relative paths in front matter, try to construct a proper file path
+                if url_str.starts_with('/') {
+                    // Absolute path within the Hugo site
+                    // You might need to adjust this based on your Hugo site structure
+                    continue; // Skip for now as we need the Hugo site root
+                } else {
+                    // Relative path
+                    match Url::from_file_path(base_dir.join(url_str)) {
+                        Ok(u) => u,
+                        Err(_) => continue,
                     }
+                }
+            };
+            
+            // Skip if we've already processed this URL
+            if processed_urls.contains(url_str) {
+                continue;
+            }
+            processed_urls.insert(url_str.to_string());
+
+            if url.scheme() == "http" || url.scheme() == "https" {
+                match download_image(&url, base_dir).await {
+                    Ok(path) => println!("Downloaded {} to {}", url, path.display()),
+                    Err(e) => eprintln!("Failed to download {}: {}", url, e),
                 }
             }
         }
