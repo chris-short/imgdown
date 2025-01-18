@@ -117,3 +117,7 @@ Contributions are welcome! Here are some ways you can contribute:
 ## Authors
 
 Chris Short <chrisshort@duck.com>
+
+## Acknowledgements
+
+- Created using Anthropic Claude 3.5 Sonnet
