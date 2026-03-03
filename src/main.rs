@@ -1,12 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use regex::Regex;
-use reqwest;
 use url::Url;
 use serde_json::Value;
-use serde_yaml;
+use serde_yml as serde_yaml;
 use toml::Value as TomlValue;
-use anyhow::{Result, Context, anyhow};
+use anyhow::{Result, Context};
 
 // Struct to hold parsed front matter information
 #[derive(Debug)]
@@ -102,7 +101,11 @@ async fn process_file(file_path: &Path) -> Result<()> {
     // First try to parse as a complete JSON file
     if content.trim().starts_with("{") {
         if let Ok(json) = serde_json::from_str::<Value>(&content) {
-            process_json_value(&json, &mut processed_urls, base_dir).await?;
+            let mut urls = Vec::new();
+            collect_urls_from_value(&json, &mut urls);
+            for url_str in urls {
+                process_url(&url_str, &mut processed_urls, base_dir).await?;
+            }
         }
     }
 
@@ -111,17 +114,29 @@ async fn process_file(file_path: &Path) -> Result<()> {
     match front_matter.format {
         FrontMatterFormat::YAML => {
             if let Ok(yaml) = serde_yaml::from_str::<Value>(&front_matter.content) {
-                process_yaml_value(&yaml, &mut processed_urls, base_dir).await?;
+                let mut urls = Vec::new();
+                collect_urls_from_value(&yaml, &mut urls);
+                for url_str in urls {
+                    process_url(&url_str, &mut processed_urls, base_dir).await?;
+                }
             }
         },
         FrontMatterFormat::TOML => {
             if let Ok(toml) = front_matter.content.parse::<TomlValue>() {
-                process_toml_value(&toml, &mut processed_urls, base_dir).await?;
+                let mut urls = Vec::new();
+                collect_urls_from_toml(&toml, &mut urls);
+                for url_str in urls {
+                    process_url(&url_str, &mut processed_urls, base_dir).await?;
+                }
             }
         },
         FrontMatterFormat::JSON => {
             if let Ok(json) = serde_json::from_str::<Value>(&front_matter.content) {
-                process_json_value(&json, &mut processed_urls, base_dir).await?;
+                let mut urls = Vec::new();
+                collect_urls_from_value(&json, &mut urls);
+                for url_str in urls {
+                    process_url(&url_str, &mut processed_urls, base_dir).await?;
+                }
             }
         },
         FrontMatterFormat::None => {}
@@ -130,7 +145,7 @@ async fn process_file(file_path: &Path) -> Result<()> {
     // Process regular content with regex patterns
     let patterns = vec![
         // HTML/Markdown patterns
-        r#"(?:src|href)=["']([^"']+\.(?:jpg|jpeg|png|svg|webp|gif))["']"#,
+        r#"(?:src|href)=["']?([^"'\s>]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?"#,
         r#"!\[.*?\]\(([^)]+\.(?:jpg|jpeg|png|svg|webp|gif))\)"#,
         r#"(?:url\(['"]?)([^'")\s]+\.(?:jpg|jpeg|png|svg|webp|gif))['"]?\)"#,
         
@@ -145,70 +160,46 @@ async fn process_file(file_path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn process_yaml_value(value: &Value, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+fn collect_urls_from_value(value: &Value, urls: &mut Vec<String>) {
     match value {
         Value::String(s) => {
             if looks_like_image_url(s) {
-                process_url(s, processed_urls, base_dir).await?;
+                urls.push(s.clone());
             }
         },
-        Value::Mapping(map) => {
-            for (_, value) in map {
-                process_yaml_value(value, processed_urls, base_dir).await?;
-            }
-        },
-        Value::Sequence(seq) => {
-            for value in seq {
-                process_yaml_value(value, processed_urls, base_dir).await?;
-            }
-        },
-        _ => {}
-    }
-    Ok(())
-}
-
-async fn process_json_value(value: &Value, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
-    match value {
-        Value::String(s) => {
-            if looks_like_image_url(s) {
-                process_url(s, processed_urls, base_dir).await?;
-            }
-        },
-        Value::Object(obj) => {
-            for (_, value) in obj {
-                process_json_value(value, processed_urls, base_dir).await?;
+        Value::Object(map) => {
+            for (_, v) in map {
+                collect_urls_from_value(v, urls);
             }
         },
         Value::Array(arr) => {
-            for value in arr {
-                process_json_value(value, processed_urls, base_dir).await?;
+            for v in arr {
+                collect_urls_from_value(v, urls);
             }
         },
         _ => {}
     }
-    Ok(())
 }
 
-async fn process_toml_value(value: &TomlValue, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+fn collect_urls_from_toml(value: &TomlValue, urls: &mut Vec<String>) {
     match value {
         TomlValue::String(s) => {
             if looks_like_image_url(s) {
-                process_url(s, processed_urls, base_dir).await?;
+                urls.push(s.clone());
             }
         },
         TomlValue::Table(table) => {
-            for (_, value) in table {
-                process_toml_value(value, processed_urls, base_dir).await?;
+            for (_, v) in table {
+                collect_urls_from_toml(v, urls);
             }
         },
         TomlValue::Array(arr) => {
-            for value in arr {
-                process_toml_value(value, processed_urls, base_dir).await?;
+            for v in arr {
+                collect_urls_from_toml(v, urls);
             }
         },
         _ => {}
     }
-    Ok(())
 }
 
 fn looks_like_image_url(s: &str) -> bool {
@@ -251,8 +242,8 @@ async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashS
 }
 
 async fn process_content_with_patterns(
-    content: &str, 
-    patterns: &[&str], 
+    content: &str,
+    patterns: &[&str],
     processed_urls: &mut std::collections::HashSet<String>,
     base_dir: &Path
 ) -> Result<()> {
@@ -263,5 +254,63 @@ async fn process_content_with_patterns(
             process_url(url_str, processed_urls, base_dir).await?;
         }
     }
+    Ok(())
+}
+
+async fn download_image(url: &Url, base_dir: &Path) -> Result<PathBuf> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(url.as_str())
+        .send()
+        .await
+        .with_context(|| format!("Failed to fetch {}", url))?;
+
+    let filename = url
+        .path_segments()
+        .and_then(|mut segs| segs.next_back())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("image");
+
+    let dest_path = base_dir.join(filename);
+
+    let bytes = response
+        .bytes()
+        .await
+        .with_context(|| format!("Failed to read response body for {}", url))?;
+
+    fs::write(&dest_path, &bytes)
+        .with_context(|| format!("Failed to write to {}", dest_path.display()))?;
+
+    Ok(dest_path)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    let dir = if args.len() > 1 {
+        PathBuf::from(&args[1])
+    } else {
+        PathBuf::from(".")
+    };
+
+    for entry in walkdir::WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let path = entry.path();
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            match ext.to_lowercase().as_str() {
+                "md" | "html" | "yaml" | "yml" | "toml" | "json" => {
+                    if let Err(e) = process_file(path).await {
+                        eprintln!("Error processing {}: {}", path.display(), e);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     Ok(())
 }
