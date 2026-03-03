@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use url::Url;
 use serde_json::Value;
-use serde_yml as serde_yaml;
+use serde_yaml;
 use toml::Value as TomlValue;
 use anyhow::{Result, Context};
 
