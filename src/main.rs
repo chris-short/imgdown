@@ -239,7 +239,9 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
         .get(url.as_str())
         .send()
         .await
-        .with_context(|| format!("Failed to fetch {}", url))?;
+        .with_context(|| format!("Failed to fetch {}", url))?
+        .error_for_status()
+        .with_context(|| format!("Server returned error for {}", url))?;
 
     let filename = url
         .path_segments()
