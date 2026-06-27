@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use anyhow::{bail, Result, Context};
 use clap::Parser;
@@ -40,6 +41,7 @@ struct Config {
     base_url: Option<Url>,
     dry_run: bool,
     allow_http: bool,
+    downloaded: Arc<Mutex<HashSet<String>>>,
 }
 
 // Struct to hold parsed front matter information
@@ -259,14 +261,6 @@ async fn process_url(url_str: &str, base_dir: &Path, config: &Config) -> Result<
 
 
 async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<PathBuf> {
-    let response = config.client
-        .get(url.as_str())
-        .send()
-        .await
-        .with_context(|| format!("Failed to fetch {}", url))?
-        .error_for_status()
-        .with_context(|| format!("Server returned error for {}", url))?;
-
     let filename = url
         .path_segments()
         .and_then(|mut segs| segs.next_back())
@@ -274,6 +268,24 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
         .unwrap_or("image");
 
     let dest_path = base_dir.join(filename);
+
+    // Atomically claim this URL across all files and concurrent tasks.
+    // insert() returns false if the URL was already present, meaning another
+    // task already owns this download — skip without hitting the network.
+    {
+        let mut seen = config.downloaded.lock().unwrap();
+        if !seen.insert(url.as_str().to_string()) {
+            return Ok(dest_path);
+        }
+    }
+
+    let response = config.client
+        .get(url.as_str())
+        .send()
+        .await
+        .with_context(|| format!("Failed to fetch {}", url))?
+        .error_for_status()
+        .with_context(|| format!("Server returned error for {}", url))?;
 
     let content_type = response
         .headers()
@@ -330,7 +342,13 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()
         .context("Failed to build HTTP client")?;
-    let config = Config { client, base_url, dry_run: args.dry_run, allow_http: args.allow_http };
+    let config = Config {
+        client,
+        base_url,
+        dry_run: args.dry_run,
+        allow_http: args.allow_http,
+        downloaded: Arc::new(Mutex::new(HashSet::new())),
+    };
 
     for entry in walkdir::WalkDir::new(&args.path)
         .into_iter()
