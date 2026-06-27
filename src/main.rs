@@ -249,6 +249,11 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
 
     let dest_path = base_dir.join(filename);
 
+    if dest_path.exists() {
+        println!("Skipping {} (already exists)", dest_path.display());
+        return Ok(dest_path);
+    }
+
     let bytes = response
         .bytes()
         .await
