@@ -22,6 +22,10 @@ struct Args {
     #[arg(default_value = ".")]
     path: PathBuf,
 
+    /// Base URL for resolving root-relative image paths (e.g. https://cdn.example.com)
+    #[arg(long)]
+    base_url: Option<String>,
+
     /// Allow downloading images over plain HTTP (not recommended)
     #[arg(long)]
     allow_http: bool,
@@ -29,6 +33,7 @@ struct Args {
 
 struct Config {
     client: Client,
+    base_url: Option<Url>,
     allow_http: bool,
 }
 
@@ -215,15 +220,18 @@ fn looks_like_image_url(s: &str) -> bool {
 async fn process_url(url_str: &str, base_dir: &Path, config: &Config) -> Result<()> {
     let url = if let Ok(parsed_url) = Url::parse(url_str) {
         parsed_url
+    } else if url_str.starts_with('/') {
+        match &config.base_url {
+            Some(base) => base
+                .join(url_str)
+                .with_context(|| format!("Could not resolve root-relative URL: {}", url_str))?,
+            None => {
+                eprintln!("Skipping root-relative URL '{}' — pass --base-url to resolve", url_str);
+                return Ok(());
+            }
+        }
     } else {
-        let path = if url_str.starts_with('/') {
-            // TODO: Handle site root configuration
-            return Ok(());
-        } else {
-            base_dir.join(url_str)
-        };
-        
-        match Url::from_file_path(path) {
+        match Url::from_file_path(base_dir.join(url_str)) {
             Ok(u) => u,
             Err(_) => return Ok(()),
         }
@@ -302,11 +310,17 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    let base_url = args
+        .base_url
+        .as_deref()
+        .map(|s| Url::parse(s).with_context(|| format!("Invalid --base-url: {}", s)))
+        .transpose()?;
+
     let client = Client::builder()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()
         .context("Failed to build HTTP client")?;
-    let config = Config { client, allow_http: args.allow_http };
+    let config = Config { client, base_url, allow_http: args.allow_http };
 
     for entry in walkdir::WalkDir::new(&args.path)
         .into_iter()
