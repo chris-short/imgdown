@@ -26,6 +26,10 @@ struct Args {
     #[arg(long)]
     base_url: Option<String>,
 
+    /// Show what would be downloaded without actually downloading
+    #[arg(long)]
+    dry_run: bool,
+
     /// Allow downloading images over plain HTTP (not recommended)
     #[arg(long)]
     allow_http: bool,
@@ -34,6 +38,7 @@ struct Args {
 struct Config {
     client: Client,
     base_url: Option<Url>,
+    dry_run: bool,
     allow_http: bool,
 }
 
@@ -291,6 +296,11 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
         return Ok(dest_path);
     }
 
+    if config.dry_run {
+        println!("[dry-run] Would download {} -> {}", url, dest_path.display());
+        return Ok(dest_path);
+    }
+
     let bytes = response
         .bytes()
         .await
@@ -320,7 +330,7 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()
         .context("Failed to build HTTP client")?;
-    let config = Config { client, base_url, allow_http: args.allow_http };
+    let config = Config { client, base_url, dry_run: args.dry_run, allow_http: args.allow_http };
 
     for entry in walkdir::WalkDir::new(&args.path)
         .into_iter()
