@@ -1,114 +1,88 @@
 # imgdown
 
-Note: I built this tool to help me yank files off my [CDN](https://bunny.net?ref=ntj8lzdwyl) into [Hugo Page Bundles](https://gohugo.io/content-management/page-bundles/)
+Built to pull images off a [CDN](https://bunny.net?ref=ntj8lzdwyl) into [Hugo Page Bundles](https://gohugo.io/content-management/page-bundles/).
 
-A Rust utility that automatically downloads images referenced in text-based files like HTML, Markdown, and CSS documents.
+A Rust utility that finds image references in text-based files and downloads them into the same directory as the source file.
 
 ## Features
 
 - Processes individual files or entire directories recursively
-- Supports multiple file formats:
-  - HTML (.html, .htm)
-  - Markdown (.md)
-  - CSS (.css)
-  - Plain text (.txt)
-  - XML (.xml)
-- Handles various image formats: JPG, JPEG, PNG, SVG, and WebP
-- Supports both relative and absolute URLs
-- Maintains original file structure
-- Skips existing files to avoid duplicate downloads
-- Follows symbolic links when scanning directories
+- Supports multiple file formats: Markdown, HTML, YAML, TOML, JSON
+- Handles image formats: JPG, JPEG, PNG, SVG, WebP, GIF
+- Parses front matter (YAML `---`, TOML `+++`, JSON `{`)
+- Skips images that already exist locally
+- Concurrent downloads per file
+- Dry-run mode to preview without downloading
+- Root-relative URL resolution via `--base-url`
 
 ## Prerequisites
 
-- Rust (latest stable version)
-- Cargo package manager
-
-## Dependencies
-
-```toml
-[dependencies]
-tokio = { version = "1.0", features = ["full"] }
-reqwest = "0.11"
-anyhow = "1.0"
-regex = "1.0"
-url = "2.0"
-walkdir = "2.0"
-```
+- Rust (latest stable)
+- Cargo
 
 ## Installation
 
-1. Clone the repository:
 ```bash
-git clone [repository-url]
+git clone https://github.com/chris-short/imgdown
 cd imgdown
-```
-
-2. Build the project:
-```bash
 cargo build --release
 ```
 
-The compiled binary will be available in `target/release/`.
+The binary will be at `target/release/imgdown`.
 
 ## Usage
 
-The application can process either a single file or an entire directory:
-
 ```bash
-# Process a single file
-./imgdown path/to/file.html
+# Process current directory
+imgdown
 
-# Process an entire directory
-./imgdown path/to/directory
+# Process a specific directory or file
+imgdown path/to/directory
+imgdown path/to/file.md
+
+# Preview what would be downloaded without touching anything
+imgdown --dry-run ./content
+
+# Resolve root-relative paths like /images/foo.jpg
+imgdown --base-url https://cdn.example.com ./content
+
+# Allow plain HTTP URLs (not recommended)
+imgdown --allow-http ./content
 ```
 
-### Example
+### Options
 
-```bash
-./imgdown ./docs/blog
-```
-
-This will:
-
-1. Scan all supported files in the `./docs/blog` directory
-2. Find image references in these files
-3. Download the images to the same directory structure as their referencing files
-4. Skip any images that have already been downloaded
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Print what would be downloaded; no network or disk activity |
+| `--base-url <URL>` | Base URL for resolving root-relative paths (e.g. `/images/foo.jpg`) |
+| `--allow-http` | Allow insecure HTTP downloads (HTTPS only by default) |
+| `-h, --help` | Print help |
+| `-V, --version` | Print version |
 
 ## How It Works
 
-1. The program accepts a file or directory path as input
-2. For directories, it recursively scans for supported file types
-3. For each file, it:
-   - Reads the content
-   - Uses regular expressions to find image references
-   - Downloads images from valid URLs
-   - Preserves the directory structure
-   - Skips existing files
+1. Walks the target path for `.md`, `.html`, `.yaml`, `.yml`, `.toml`, and `.json` files
+2. For each file, extracts image URLs from:
+   - Front matter (YAML, TOML, or JSON blocks at the top of the file)
+   - Inline content via regex (Markdown image syntax, HTML `src`/`href`, CSS `url()`, and common front matter key names)
+3. Deduplicates URLs, then downloads all of them concurrently into the same directory as the source file
+4. Skips any URL that already exists on disk
 
-## Error Handling
+## Security
 
-- Invalid paths result in appropriate error messages
-- Download failures are logged but don't stop the process
-- File access issues are reported with detailed error messages
+- HTTPS by default; plain HTTP requires `--allow-http`
+- 30-second request timeout
+- 50 MB per-image download limit
+- Content-Type must start with `image/` or the download is rejected
+- HTTP 4xx/5xx responses are treated as errors, not written to disk
+- Uses [rustls](https://github.com/rustls/rustls) for TLS
 
 ## Limitations
 
-- Only processes files with supported extensions
-- Requires valid URL formatting in source files
-- Does not validate image content
 - Does not process JavaScript-generated image references
-
-## Contributing
-
-Contributions are welcome! Here are some ways you can contribute:
-
-- Report bugs
-- Suggest new features
-- Add support for more file types
-- Improve error handling
-- Enhance documentation
+- Root-relative URLs (e.g. `/images/foo.jpg`) require `--base-url`
+- Does not rewrite source files to update paths after downloading
 
 ## License
 
@@ -117,7 +91,3 @@ Contributions are welcome! Here are some ways you can contribute:
 ## Authors
 
 Chris Short <chrisshort@duck.com>
-
-## Acknowledgements
-
-- Created using Anthropic Claude 3.5 Sonnet
