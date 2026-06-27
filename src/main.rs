@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::Duration;
 use anyhow::{Result, Context};
 use clap::Parser;
 use reqwest::Client;
+
+const REQUEST_TIMEOUT_SECS: u64 = 30;
 use regex::Regex;
 use serde_json::Value;
 use serde_yml;
@@ -306,7 +309,10 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .context("Failed to build HTTP client")?;
     let config = Config { client };
 
     for entry in walkdir::WalkDir::new(&args.path)
