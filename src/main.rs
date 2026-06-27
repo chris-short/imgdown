@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use anyhow::{Result, Context};
 use clap::Parser;
 use regex::Regex;
@@ -151,20 +152,7 @@ async fn process_file(file_path: &Path) -> Result<()> {
         FrontMatterFormat::None => {}
     }
 
-    // Process regular content with regex patterns
-    let patterns = vec![
-        // HTML/Markdown patterns
-        r#"(?:src|href)=["']?([^"'\s>]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?"#,
-        r#"!\[.*?\]\(([^)]+\.(?:jpg|jpeg|png|svg|webp|gif))\)"#,
-        r#"(?:url\(['"]?)([^'")\s]+\.(?:jpg|jpeg|png|svg|webp|gif))['"]?\)"#,
-        
-        // Additional patterns for various formats
-        r#"(?m)^(?:image|cover|featured_image|thumbnail|banner|avatar|logo):\s*["']?([^"'\s\[]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?\s*$"#,
-        r#"(?m)^\s+(?:image|caption|icon):\s*["']?([^"'\s\[]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?\s*$"#,
-        r#"["']?(?:image|cover|featured_image|thumbnail)["']?\s*[:=]\s*["']([^"']+\.(?:jpg|jpeg|png|svg|webp|gif))["']"#,
-    ];
-
-    process_content_with_patterns(&content, &patterns, &mut processed_urls, base_dir).await?;
+    process_content_with_patterns(&content, &mut processed_urls, base_dir).await?;
 
     Ok(())
 }
@@ -211,6 +199,24 @@ fn collect_urls_from_toml(value: &TomlValue, urls: &mut Vec<String>) {
     }
 }
 
+static CONTENT_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+
+fn content_patterns() -> &'static Vec<Regex> {
+    CONTENT_PATTERNS.get_or_init(|| {
+        [
+            r#"(?:src|href)=["']?([^"'\s>]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?"#,
+            r#"!\[.*?\]\(([^)]+\.(?:jpg|jpeg|png|svg|webp|gif))\)"#,
+            r#"(?:url\(['"]?)([^'")\s]+\.(?:jpg|jpeg|png|svg|webp|gif))['"]?\)"#,
+            r#"(?m)^(?:image|cover|featured_image|thumbnail|banner|avatar|logo):\s*["']?([^"'\s\[]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?\s*$"#,
+            r#"(?m)^\s+(?:image|caption|icon):\s*["']?([^"'\s\[]+\.(?:jpg|jpeg|png|svg|webp|gif))["']?\s*$"#,
+            r#"["']?(?:image|cover|featured_image|thumbnail)["']?\s*[:=]\s*["']([^"']+\.(?:jpg|jpeg|png|svg|webp|gif))["']"#,
+        ]
+        .iter()
+        .map(|p| Regex::new(p).expect("invalid pattern"))
+        .collect()
+    })
+}
+
 fn looks_like_image_url(s: &str) -> bool {
     let lower = s.to_lowercase();
     lower.ends_with(".jpg") || lower.ends_with(".jpeg") || 
@@ -252,12 +258,10 @@ async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashS
 
 async fn process_content_with_patterns(
     content: &str,
-    patterns: &[&str],
     processed_urls: &mut std::collections::HashSet<String>,
     base_dir: &Path
 ) -> Result<()> {
-    for pattern in patterns {
-        let re = Regex::new(pattern)?;
+    for re in content_patterns() {
         for cap in re.captures_iter(content) {
             let url_str = &cap[1];
             process_url(url_str, processed_urls, base_dir).await?;
