@@ -8,6 +8,7 @@ use futures::future::join_all;
 use reqwest::Client;
 
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+const MAX_DOWNLOAD_BYTES: u64 = 50 * 1024 * 1024;
 use regex::Regex;
 use serde_json::Value;
 use serde_yml;
@@ -261,6 +262,12 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
         bail!("Unexpected content-type '{}' for {}", content_type, url);
     }
 
+    if let Some(len) = response.content_length() {
+        if len > MAX_DOWNLOAD_BYTES {
+            bail!("Content-Length {} exceeds 50 MB limit for {}", len, url);
+        }
+    }
+
     if dest_path.exists() {
         println!("Skipping {} (already exists)", dest_path.display());
         return Ok(dest_path);
@@ -270,6 +277,10 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
         .bytes()
         .await
         .with_context(|| format!("Failed to read response body for {}", url))?;
+
+    if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
+        bail!("Downloaded {} bytes exceeds 50 MB limit for {}", bytes.len(), url);
+    }
 
     fs::write(&dest_path, &bytes)
         .with_context(|| format!("Failed to write to {}", dest_path.display()))?;
