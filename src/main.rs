@@ -21,10 +21,15 @@ struct Args {
     /// Directory or file to process
     #[arg(default_value = ".")]
     path: PathBuf,
+
+    /// Allow downloading images over plain HTTP (not recommended)
+    #[arg(long)]
+    allow_http: bool,
 }
 
 struct Config {
     client: Client,
+    allow_http: bool,
 }
 
 // Struct to hold parsed front matter information
@@ -224,6 +229,11 @@ async fn process_url(url_str: &str, base_dir: &Path, config: &Config) -> Result<
         }
     };
     
+    if url.scheme() == "http" && !config.allow_http {
+        eprintln!("Skipping insecure URL '{}' — pass --allow-http to allow plain HTTP", url_str);
+        return Ok(());
+    }
+
     if url.scheme() == "http" || url.scheme() == "https" {
         match download_image(&url, base_dir, config).await {
             Ok(path) => println!("Downloaded {} to {}", url, path.display()),
@@ -296,7 +306,7 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()
         .context("Failed to build HTTP client")?;
-    let config = Config { client };
+    let config = Config { client, allow_http: args.allow_http };
 
     for entry in walkdir::WalkDir::new(&args.path)
         .into_iter()
