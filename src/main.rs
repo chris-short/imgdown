@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
-use anyhow::{Result, Context};
+use anyhow::{bail, Result, Context};
 use clap::Parser;
 use futures::future::join_all;
 use reqwest::Client;
@@ -250,6 +250,16 @@ async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<P
         .unwrap_or("image");
 
     let dest_path = base_dir.join(filename);
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    if !content_type.starts_with("image/") {
+        bail!("Unexpected content-type '{}' for {}", content_type, url);
+    }
 
     if dest_path.exists() {
         println!("Skipping {} (already exists)", dest_path.display());
