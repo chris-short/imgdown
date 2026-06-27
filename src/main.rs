@@ -1,11 +1,20 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use anyhow::{Result, Context};
+use clap::Parser;
 use regex::Regex;
-use url::Url;
 use serde_json::Value;
 use serde_yml;
 use toml::Value as TomlValue;
-use anyhow::{Result, Context};
+use url::Url;
+
+#[derive(Parser)]
+#[command(version, about = "Download images referenced in text-based files")]
+struct Args {
+    /// Directory or file to process
+    #[arg(default_value = ".")]
+    path: PathBuf,
+}
 
 // Struct to hold parsed front matter information
 #[derive(Debug)]
@@ -286,15 +295,9 @@ async fn download_image(url: &Url, base_dir: &Path) -> Result<PathBuf> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let args = Args::parse();
 
-    let dir = if args.len() > 1 {
-        PathBuf::from(&args[1])
-    } else {
-        PathBuf::from(".")
-    };
-
-    for entry in walkdir::WalkDir::new(&dir)
+    for entry in walkdir::WalkDir::new(&args.path)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
