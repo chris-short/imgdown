@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use anyhow::{Result, Context};
 use clap::Parser;
+use futures::future::join_all;
 use reqwest::Client;
 
 const REQUEST_TIMEOUT_SECS: u64 = 30;
@@ -110,99 +111,72 @@ fn find_json_end(content: &str) -> Option<usize> {
 async fn process_file(file_path: &Path, config: &Config) -> Result<()> {
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
-    
-    let base_dir = file_path.parent()
-        .unwrap_or_else(|| Path::new(""));
 
-    let mut processed_urls = std::collections::HashSet::new();
+    let base_dir = file_path.parent().unwrap_or_else(|| Path::new(""));
+    let mut url_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // First try to parse as a complete JSON file
-    if content.trim().starts_with("{") {
+    // Complete JSON file
+    if content.trim().starts_with('{') {
         if let Ok(json) = serde_json::from_str::<Value>(&content) {
-            let mut urls = Vec::new();
-            collect_urls_from_value(&json, &mut urls);
-            for url_str in urls {
-                process_url(&url_str, &mut processed_urls, base_dir, config).await?;
-            }
+            collect_urls_from_value(&json, &mut url_set);
         }
     }
 
-    // Extract and process front matter
+    // Front matter
     let front_matter = FrontMatter::parse(&content)?;
     match front_matter.format {
         FrontMatterFormat::YAML => {
             if let Ok(yaml) = serde_yml::from_str::<Value>(&front_matter.content) {
-                let mut urls = Vec::new();
-                collect_urls_from_value(&yaml, &mut urls);
-                for url_str in urls {
-                    process_url(&url_str, &mut processed_urls, base_dir, config).await?;
-                }
+                collect_urls_from_value(&yaml, &mut url_set);
             }
         },
         FrontMatterFormat::TOML => {
             if let Ok(toml) = front_matter.content.parse::<TomlValue>() {
-                let mut urls = Vec::new();
-                collect_urls_from_toml(&toml, &mut urls);
-                for url_str in urls {
-                    process_url(&url_str, &mut processed_urls, base_dir, config).await?;
-                }
+                collect_urls_from_toml(&toml, &mut url_set);
             }
         },
         FrontMatterFormat::JSON => {
             if let Ok(json) = serde_json::from_str::<Value>(&front_matter.content) {
-                let mut urls = Vec::new();
-                collect_urls_from_value(&json, &mut urls);
-                for url_str in urls {
-                    process_url(&url_str, &mut processed_urls, base_dir, config).await?;
-                }
+                collect_urls_from_value(&json, &mut url_set);
             }
         },
         FrontMatterFormat::None => {}
     }
 
-    process_content_with_patterns(&content, &mut processed_urls, base_dir, config).await?;
+    // Regex scan of raw content
+    for re in content_patterns() {
+        for cap in re.captures_iter(&content) {
+            url_set.insert(cap[1].to_string());
+        }
+    }
+
+    // Fire all downloads for this file concurrently
+    let futs: Vec<_> = url_set.iter()
+        .map(|url_str| process_url(url_str, base_dir, config))
+        .collect();
+    for result in join_all(futs).await {
+        if let Err(e) = result {
+            eprintln!("  error: {e}");
+        }
+    }
 
     Ok(())
 }
 
-fn collect_urls_from_value(value: &Value, urls: &mut Vec<String>) {
+fn collect_urls_from_value(value: &Value, out: &mut std::collections::HashSet<String>) {
     match value {
-        Value::String(s) => {
-            if looks_like_image_url(s) {
-                urls.push(s.clone());
-            }
-        },
-        Value::Object(map) => {
-            for (_, v) in map {
-                collect_urls_from_value(v, urls);
-            }
-        },
-        Value::Array(arr) => {
-            for v in arr {
-                collect_urls_from_value(v, urls);
-            }
-        },
+        Value::String(s) if looks_like_image_url(s) => { out.insert(s.clone()); },
+        Value::Object(map) => map.values().for_each(|v| collect_urls_from_value(v, out)),
+        Value::Array(arr) => arr.iter().for_each(|v| collect_urls_from_value(v, out)),
         _ => {}
     }
 }
 
-fn collect_urls_from_toml(value: &TomlValue, urls: &mut Vec<String>) {
+fn collect_urls_from_toml(value: &TomlValue, out: &mut std::collections::HashSet<String>) {
     match value {
-        TomlValue::String(s) => {
-            if looks_like_image_url(s) {
-                urls.push(s.clone());
-            }
-        },
-        TomlValue::Table(table) => {
-            for (_, v) in table {
-                collect_urls_from_toml(v, urls);
-            }
-        },
-        TomlValue::Array(arr) => {
-            for v in arr {
-                collect_urls_from_toml(v, urls);
-            }
-        },
+        TomlValue::String(s) if looks_like_image_url(s) => { out.insert(s.clone()); },
+        TomlValue::Table(t) => t.values().for_each(|v| collect_urls_from_toml(v, out)),
+        TomlValue::Array(a) => a.iter().for_each(|v| collect_urls_from_toml(v, out)),
         _ => {}
     }
 }
@@ -232,12 +206,7 @@ fn looks_like_image_url(s: &str) -> bool {
     lower.ends_with(".webp") || lower.ends_with(".gif")
 }
 
-async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path, config: &Config) -> Result<()> {
-    if processed_urls.contains(url_str) {
-        return Ok(());
-    }
-    processed_urls.insert(url_str.to_string());
-
+async fn process_url(url_str: &str, base_dir: &Path, config: &Config) -> Result<()> {
     let url = if let Ok(parsed_url) = Url::parse(url_str) {
         parsed_url
     } else {
@@ -264,20 +233,6 @@ async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashS
     Ok(())
 }
 
-async fn process_content_with_patterns(
-    content: &str,
-    processed_urls: &mut std::collections::HashSet<String>,
-    base_dir: &Path,
-    config: &Config,
-) -> Result<()> {
-    for re in content_patterns() {
-        for cap in re.captures_iter(content) {
-            let url_str = &cap[1];
-            process_url(url_str, processed_urls, base_dir, config).await?;
-        }
-    }
-    Ok(())
-}
 
 async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<PathBuf> {
     let response = config.client
