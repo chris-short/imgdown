@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use url::Url;
 use serde_json::Value;
-use serde_yaml;
+use serde_yml;
 use toml::Value as TomlValue;
 use anyhow::{Result, Context};
 
@@ -113,7 +113,7 @@ async fn process_file(file_path: &Path) -> Result<()> {
     let front_matter = FrontMatter::parse(&content)?;
     match front_matter.format {
         FrontMatterFormat::YAML => {
-            if let Ok(yaml) = serde_yaml::from_str::<Value>(&front_matter.content) {
+            if let Ok(yaml) = serde_yml::from_str::<Value>(&front_matter.content) {
                 let mut urls = Vec::new();
                 collect_urls_from_value(&yaml, &mut urls);
                 for url_str in urls {
