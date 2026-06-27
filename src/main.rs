@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use anyhow::{Result, Context};
 use clap::Parser;
+use reqwest::Client;
 use regex::Regex;
 use serde_json::Value;
 use serde_yml;
@@ -15,6 +16,10 @@ struct Args {
     /// Directory or file to process
     #[arg(default_value = ".")]
     path: PathBuf,
+}
+
+struct Config {
+    client: Client,
 }
 
 // Struct to hold parsed front matter information
@@ -99,7 +104,7 @@ fn find_json_end(content: &str) -> Option<usize> {
     None
 }
 
-async fn process_file(file_path: &Path) -> Result<()> {
+async fn process_file(file_path: &Path, config: &Config) -> Result<()> {
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
     
@@ -114,7 +119,7 @@ async fn process_file(file_path: &Path) -> Result<()> {
             let mut urls = Vec::new();
             collect_urls_from_value(&json, &mut urls);
             for url_str in urls {
-                process_url(&url_str, &mut processed_urls, base_dir).await?;
+                process_url(&url_str, &mut processed_urls, base_dir, config).await?;
             }
         }
     }
@@ -127,7 +132,7 @@ async fn process_file(file_path: &Path) -> Result<()> {
                 let mut urls = Vec::new();
                 collect_urls_from_value(&yaml, &mut urls);
                 for url_str in urls {
-                    process_url(&url_str, &mut processed_urls, base_dir).await?;
+                    process_url(&url_str, &mut processed_urls, base_dir, config).await?;
                 }
             }
         },
@@ -136,7 +141,7 @@ async fn process_file(file_path: &Path) -> Result<()> {
                 let mut urls = Vec::new();
                 collect_urls_from_toml(&toml, &mut urls);
                 for url_str in urls {
-                    process_url(&url_str, &mut processed_urls, base_dir).await?;
+                    process_url(&url_str, &mut processed_urls, base_dir, config).await?;
                 }
             }
         },
@@ -145,14 +150,14 @@ async fn process_file(file_path: &Path) -> Result<()> {
                 let mut urls = Vec::new();
                 collect_urls_from_value(&json, &mut urls);
                 for url_str in urls {
-                    process_url(&url_str, &mut processed_urls, base_dir).await?;
+                    process_url(&url_str, &mut processed_urls, base_dir, config).await?;
                 }
             }
         },
         FrontMatterFormat::None => {}
     }
 
-    process_content_with_patterns(&content, &mut processed_urls, base_dir).await?;
+    process_content_with_patterns(&content, &mut processed_urls, base_dir, config).await?;
 
     Ok(())
 }
@@ -224,7 +229,7 @@ fn looks_like_image_url(s: &str) -> bool {
     lower.ends_with(".webp") || lower.ends_with(".gif")
 }
 
-async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path) -> Result<()> {
+async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashSet<String>, base_dir: &Path, config: &Config) -> Result<()> {
     if processed_urls.contains(url_str) {
         return Ok(());
     }
@@ -247,7 +252,7 @@ async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashS
     };
     
     if url.scheme() == "http" || url.scheme() == "https" {
-        match download_image(&url, base_dir).await {
+        match download_image(&url, base_dir, config).await {
             Ok(path) => println!("Downloaded {} to {}", url, path.display()),
             Err(e) => eprintln!("Failed to download {}: {}", url, e),
         }
@@ -259,20 +264,20 @@ async fn process_url(url_str: &str, processed_urls: &mut std::collections::HashS
 async fn process_content_with_patterns(
     content: &str,
     processed_urls: &mut std::collections::HashSet<String>,
-    base_dir: &Path
+    base_dir: &Path,
+    config: &Config,
 ) -> Result<()> {
     for re in content_patterns() {
         for cap in re.captures_iter(content) {
             let url_str = &cap[1];
-            process_url(url_str, processed_urls, base_dir).await?;
+            process_url(url_str, processed_urls, base_dir, config).await?;
         }
     }
     Ok(())
 }
 
-async fn download_image(url: &Url, base_dir: &Path) -> Result<PathBuf> {
-    let client = reqwest::Client::new();
-    let response = client
+async fn download_image(url: &Url, base_dir: &Path, config: &Config) -> Result<PathBuf> {
+    let response = config.client
         .get(url.as_str())
         .send()
         .await
@@ -301,6 +306,9 @@ async fn download_image(url: &Url, base_dir: &Path) -> Result<PathBuf> {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    let client = Client::new();
+    let config = Config { client };
+
     for entry in walkdir::WalkDir::new(&args.path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -310,7 +318,7 @@ async fn main() -> Result<()> {
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             match ext.to_lowercase().as_str() {
                 "md" | "html" | "yaml" | "yml" | "toml" | "json" => {
-                    if let Err(e) = process_file(path).await {
+                    if let Err(e) = process_file(path, &config).await {
                         eprintln!("Error processing {}: {}", path.display(), e);
                     }
                 }
