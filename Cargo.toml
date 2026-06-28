@@ -2,6 +2,9 @@
 name = "imgdown"
 version = "0.2.0"
 edition = "2021"
+repository = "https://github.com/chris-short/imgdown"
+homepage = "https://github.com/chris-short/imgdown"
+description = "Download images from URLs found in markdown files"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -15,3 +18,18 @@ serde_yml = "0"
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
+
+[workspace]
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+installers = ["homebrew"]
+tap = "chris-short/homebrew-imgdown"
+publish-jobs = ["homebrew"]
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+]
