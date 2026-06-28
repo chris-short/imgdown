@@ -15,12 +15,15 @@ A Rust utility that finds image references in text-based files and downloads the
 - Dry-run mode to preview without downloading
 - Root-relative URL resolution via `--base-url`
 
-## Prerequisites
-
-- Rust (latest stable)
-- Cargo
-
 ## Installation
+
+### Homebrew (macOS and Linux)
+
+```bash
+brew install chris-short/tap/imgdown
+```
+
+### From source
 
 ```bash
 git clone https://github.com/chris-short/imgdown
@@ -28,7 +31,7 @@ cd imgdown
 cargo build --release
 ```
 
-The binary will be at `target/release/imgdown`.
+The binary will be at `target/release/imgdown`. Requires Rust (latest stable).
 
 ## Usage
 
