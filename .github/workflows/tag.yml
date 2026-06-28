@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.IMGDOWN_RELEASE_TOKEN }}
           fetch-depth: 0
 
       - name: Install Rust
@@ -43,4 +43,4 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: bump version to ${{ steps.calver.outputs.version }} [skip ci]"
           git tag "${{ steps.calver.outputs.tag }}"
-          git push origin main "${{ steps.calver.outputs.tag }}"
+          git push origin "${{ steps.calver.outputs.tag }}"
