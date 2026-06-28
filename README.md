@@ -20,7 +20,7 @@ A Rust utility that finds image references in text-based files and downloads the
 ### Homebrew (macOS and Linux)
 
 ```bash
-brew install chris-short/tap/imgdown
+brew install chris-short/imgdown/imgdown
 ```
 
 ### From source
