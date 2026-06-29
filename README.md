@@ -33,13 +33,17 @@ Download the latest release for your platform from [GitHub Releases](https://git
 | Intel macOS | `imgdown-x86_64-apple-darwin.tar.xz` |
 | ARM64 Linux | `imgdown-aarch64-unknown-linux-gnu.tar.xz` |
 | x64 Linux | `imgdown-x86_64-unknown-linux-gnu.tar.xz` |
+| x64 Windows | `imgdown-x86_64-pc-windows-msvc.zip` |
+| ARM64 Windows | `imgdown-aarch64-pc-windows-msvc.zip` |
 
-Extract and move the binary to somewhere in your `$PATH`:
+macOS/Linux: extract and move the binary to somewhere in your `$PATH`:
 
 ```bash
 tar -xf imgdown-*.tar.xz
 mv imgdown /usr/local/bin/
 ```
+
+Windows: extract the `.zip` and move `imgdown.exe` to a directory in your `%PATH%`.
 
 No Rust toolchain required.
 
