@@ -114,7 +114,3 @@ imgdown --allow-http ./content
 ## License
 
 [MIT License](LICENSE)
-
-## Authors
-
-Chris Short <chrisshort@duck.com>
