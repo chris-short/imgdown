@@ -1,6 +1,6 @@
 [package]
 name = "imgdown"
-version = "0.2.0"
+version = "0.20260629.7"
 edition = "2021"
 repository = "https://github.com/chris-short/imgdown"
 homepage = "https://github.com/chris-short/imgdown"
