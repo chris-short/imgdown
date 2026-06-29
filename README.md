@@ -23,6 +23,26 @@ A Rust utility that finds image references in text-based files and downloads the
 brew install chris-short/imgdown/imgdown
 ```
 
+### Pre-built binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/chris-short/imgdown/releases/latest):
+
+| Platform | File |
+|----------|------|
+| Apple Silicon macOS | `imgdown-aarch64-apple-darwin.tar.xz` |
+| Intel macOS | `imgdown-x86_64-apple-darwin.tar.xz` |
+| ARM64 Linux | `imgdown-aarch64-unknown-linux-gnu.tar.xz` |
+| x64 Linux | `imgdown-x86_64-unknown-linux-gnu.tar.xz` |
+
+Extract and move the binary to somewhere in your `$PATH`:
+
+```bash
+tar -xf imgdown-*.tar.xz
+mv imgdown /usr/local/bin/
+```
+
+No Rust toolchain required.
+
 ### From source
 
 ```bash
